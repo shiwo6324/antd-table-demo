@@ -4,9 +4,9 @@ import MutiSelectForm2 from './form/muti-form';
 
 function App() {
   return (
-    // <MutiSelectForm1 />
+    <MutiSelectForm1 />
 
-    <MutiSelectForm2 />
+    // <MutiSelectForm2 />
   );
 }
 

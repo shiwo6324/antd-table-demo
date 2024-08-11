@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, SetStateAction } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { ProTable, ActionType } from '@ant-design/pro-components';
 import { Checkbox, CheckboxProps } from 'antd';
 import { TableRowSelection } from 'antd/lib/table/interface';
@@ -10,7 +10,6 @@ interface DataItem {
   address: string;
 }
 
-// 模拟数据生成函数
 const generateMockData = (current: number, pageSize: number): DataItem[] => {
   return Array.from(
     { length: pageSize },
@@ -30,144 +29,129 @@ const columns = [
 ];
 
 const MutiSelectForm: React.FC = () => {
-  // antd pro 组件选择功能需要的状态
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  // antd pro 组件选择功能需要的状态
-  const [selectedRows, setSelectedRows] = useState<DataItem[]>([]);
-  // 记录全选后取消某个 item 的 key
-  const [removedRows, setRemovedRows] = useState<number[]>([]);
-  const [isSelectedAll, setIsSelectedAll] = useState<boolean>(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<number>>(new Set());
+  const [excludedKeys, setExcludedKeys] = useState<Set<number>>(new Set());
+  const [isAllSelected, setIsAllSelected] = useState(false);
   const actionRef = useRef<ActionType>();
-  const [indeterminate, setIndeterminate] = useState(false);
   const [data, setData] = useState<DataItem[]>([]);
   const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
 
-  const onSelectChange = (
-    newSelectedRowKeys: React.Key[],
-    newSelectedRows: DataItem[]
-  ) => {
-    setSelectedRowKeys(newSelectedRowKeys);
-    setSelectedRows(newSelectedRows);
-  };
-
-  const onCheckAllChange: CheckboxProps['onChange'] = (e) => {
-    const checked = e.target.checked;
-
-    if (checked || indeterminate) {
-      setIndeterminate(false);
-      setIsSelectedAll(true);
-      const newSelectedRowKeys = data.map((item) => item.key);
-      setSelectedRowKeys(newSelectedRowKeys);
-      setSelectedRows(data);
-      setRemovedRows([]);
-    } else {
-      setIsSelectedAll(false);
-      setRemovedRows([]);
-      setSelectedRowKeys([]);
-      setSelectedRows([]);
-    }
-  };
-  const pagination = {
-    pageSize,
-    showSizeChanger: true,
-    onChange: (page: any, newPageSize: SetStateAction<number>) => {
-      setPageSize(newPageSize);
+  const isItemSelected = useCallback(
+    (key: number) => {
+      return isAllSelected ? !excludedKeys.has(key) : selectedKeys.has(key);
     },
-  };
+    [isAllSelected, excludedKeys, selectedKeys]
+  );
+
+  const updateSelection = useCallback(
+    (key: number, selected: boolean) => {
+      if (isAllSelected) {
+        setExcludedKeys((prev) => {
+          const next = new Set(prev);
+          if (selected) {
+            next.delete(key);
+          } else {
+            next.add(key);
+          }
+          return next;
+        });
+      } else {
+        setSelectedKeys((prev) => {
+          const next = new Set(prev);
+          if (selected) {
+            next.add(key);
+          } else {
+            next.delete(key);
+          }
+          return next;
+        });
+      }
+    },
+    [isAllSelected]
+  );
+
+  const onCheckAllChange = useCallback((e: CheckboxProps) => {
+    const checked = e.target?.checked ?? false;
+    setIsAllSelected(checked);
+    if (checked) {
+      setSelectedKeys(new Set());
+      setExcludedKeys(new Set());
+    } else {
+      setSelectedKeys(new Set());
+      setExcludedKeys(new Set());
+    }
+  }, []);
+
+  const selectedCount = useMemo(() => {
+    return isAllSelected ? totalItems - excludedKeys.size : selectedKeys.size;
+  }, [isAllSelected, totalItems, excludedKeys.size, selectedKeys.size]);
 
   const rowSelection: TableRowSelection<DataItem> = {
-    selectedRowKeys,
-    onChange: onSelectChange,
-    columnTitle() {
-      return (
-        <Checkbox
-          indeterminate={indeterminate}
-          onChange={onCheckAllChange}
-          checked={isSelectedAll}
-        />
+    selectedRowKeys: data
+      .filter((item) => isItemSelected(item.key))
+      .map((item) => item.key),
+    onSelect: (item: DataItem, selected: boolean) => {
+      updateSelection(item.key, selected);
+    },
+    onSelectAll: (
+      selected: boolean,
+      selectedRows: DataItem[],
+      changeRows: DataItem[]
+    ) => {
+      changeRows.forEach((row) => updateSelection(row.key, selected));
+    },
+    getCheckboxProps: (record: DataItem) => ({
+      disabled: false,
+      name: record.name,
+    }),
+    columnTitle: () => (
+      <Checkbox
+        indeterminate={selectedCount > 0 && selectedCount < totalItems}
+        onChange={onCheckAllChange}
+        checked={
+          isAllSelected || (!isAllSelected && selectedCount === totalItems)
+        }
+      />
+    ),
+  };
+
+  const request = useCallback(
+    async (params: { current: number; pageSize: number }) => {
+      const { current, pageSize } = params;
+      return new Promise<{ data: DataItem[]; total: number; success: boolean }>(
+        (resolve) => {
+          setTimeout(() => {
+            const result = {
+              data: generateMockData(current, pageSize),
+              total: 1000,
+              success: true,
+            };
+            setData(result.data);
+            setTotalItems(result.total);
+            resolve(result);
+          }, 300);
+        }
       );
     },
-    onSelect: (item: DataItem, checked: boolean) => {
-      if (!checked) {
-        setRemovedRows((currentItems) => [...currentItems, item.key]);
-        setIndeterminate(true);
-      } else {
-        setRemovedRows((currentItems) =>
-          currentItems.filter((currentItem) => currentItem !== item.key)
-        );
-        setIndeterminate(true);
-      }
-    },
-  };
-  useEffect(() => {
-    // 每次分页都会执行~
-    if (selectedRowKeys.length === data.length && removedRows.length === 0) {
-      setIndeterminate(false);
-      setIsSelectedAll(true);
-    }
-    if (selectedRowKeys.length === 0) {
-      setIndeterminate(false);
-      setIsSelectedAll(false);
-    }
-  }, [selectedRowKeys, removedRows]);
-
-  const request = async (params: { current: number; pageSize: number }) => {
-    const { current, pageSize } = params;
-
-    return new Promise<{ data: DataItem[]; total: number; success: boolean }>(
-      (resolve) => {
-        setTimeout(() => {
-          const result = {
-            data: generateMockData(current, pageSize),
-            total: 100,
-            success: true,
-          };
-          setData(result.data);
-          if (isSelectedAll) {
-            const newSelectedRowKeys = result.data
-              .map((item) => item.key)
-              .filter((key) => !removedRows.includes(key));
-
-            // 使用 Set 来确保 key 不重复
-            setSelectedRowKeys((current) => [
-              ...new Set([...current, ...newSelectedRowKeys]),
-            ]);
-
-            const newSelectedRows = result.data.filter(
-              (item) => !removedRows.includes(item.key)
-            );
-
-            // 使用 Set 确保 key 不重复，并过滤出唯一的 rows
-            setSelectedRows((current) => {
-              const allRows = [...current, ...newSelectedRows];
-              const uniqueKeys = new Set();
-              return allRows.filter((row) => {
-                if (!uniqueKeys.has(row.key)) {
-                  uniqueKeys.add(row.key);
-                  return true;
-                }
-                return false;
-              });
-            });
-          }
-          resolve(result);
-        }, 300);
-      }
-    );
-  };
+    []
+  );
 
   return (
     <ProTable<DataItem>
-      pagination={pagination}
       columns={columns}
       request={request}
       rowSelection={rowSelection}
       rowKey="key"
       search={false}
       dateFormatter="string"
-      headerTitle="示例表格 (跨页全选)"
+      headerTitle={`示例表格 (跨页全选) - 已选择 ${selectedCount} 项`}
       actionRef={actionRef}
-      tableAlertRender={() => <></>}
+      pagination={{
+        pageSize,
+        showSizeChanger: true,
+        onChange: (_, newPageSize) => setPageSize(newPageSize),
+      }}
     />
   );
 };
